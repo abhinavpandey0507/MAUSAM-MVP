@@ -35,8 +35,22 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 
 ## 2. Run it
 
+> Repository: https://github.com/abhinavpandey0507/MAUSAM-MVP
+
 > On Windows, `npm.ps1` is often blocked by the PowerShell execution policy —
 > use **`npm.cmd`** instead of `npm`.
+
+### Option 0 — Try it live (Render, ~2 minutes)
+
+1. Push this repo to GitHub (already done — see the link above).
+2. Go to **render.com** → **New +** → **Blueprint** → connect the `MAUSAM-MVP` repo.
+3. Render finds `render.yaml` automatically → click **Apply**.
+4. Wait for the build (~3–4 min) → open your public URL
+   (`https://mausam-mvp.onrender.com` by default).
+
+> Live IMD scraping runs best from India; from overseas hosts it may be unreachable —
+> the app then shows clearly-labelled simulated data, exactly as designed. The
+> personalization, onboarding, MAUSAM AI and warning-override demos work everywhere.
 
 ### Option A — Production (single server)
 

@@ -1,0 +1,19 @@
+# Render Blueprint — deploy "MAUSAM" to a live URL in ~2 minutes.
+# How to use: push this repo to GitHub, then in Render dashboard:
+#   New +  →  Blueprint  →  connect this repo  →  Apply.
+# You get a public URL like https://mausam-mvp.onrender.com
+
+services:
+  - type: web
+    name: mausam-mvp
+    runtime: node
+    plan: free
+    region: singapore
+    healthCheckPath: /api/health
+    buildCommand: cd client && npm install && npm run build && cd ../server && npm install
+    startCommand: cd server && node src/index.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: ENABLE_LIVE_IMD
+        value: true
