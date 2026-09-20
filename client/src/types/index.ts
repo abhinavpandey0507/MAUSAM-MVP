@@ -209,6 +209,7 @@ export interface Profile {
   activity: string;
   notify: { alerts: boolean; daily: boolean; insights: boolean };
   onboarded: boolean;
+  assistantIntroSeen: boolean;
 }
 
 export interface AppState {
@@ -217,5 +218,7 @@ export interface AppState {
   language: Language;
   demoMode: boolean;
   severeSim: boolean;
+  voiceEnabled: boolean;
+  voiceAutoSpeak: boolean;
   profile: Profile;
 }

@@ -1,6 +1,7 @@
 import type {
   CurrentWeather,
   ForecastDay,
+  Language,
   PersonaId,
   PersonalizationResult,
   Warning,
@@ -32,6 +33,7 @@ export type AiIntent =
   | 'help';
 
 export interface MausamAiContext {
+  language: Language;
   userName: string;
   persona: PersonaId;
   personas: PersonaId[];
@@ -56,6 +58,10 @@ export interface AiAnswer {
   basis: string[];
 }
 
+type TDict = (key: string) => string;
+
+const DATE_LOCALE: Record<Language, string> = { en: 'en-IN', hi: 'hi-IN', pa: 'pa-IN' };
+
 const num = (v: number | null | undefined): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : null;
 const round = (v: number | null | undefined): string => {
@@ -65,6 +71,7 @@ const round = (v: number | null | undefined): string => {
 
 export function buildMausamAiContext(opts: {
   weather: WeatherEnvelope | null;
+  language: Language;
   name: string;
   persona: PersonaId;
   personas: PersonaId[];
@@ -80,6 +87,7 @@ export function buildMausamAiContext(opts: {
   const safetyActive = !!(warning && SEVERITY_RANK[warning.severity] >= SEVERITY_RANK.watch);
   const result = personalize(w, opts.persona, opts.personas, opts.requirements, warnings);
   return {
+    language: opts.language,
     userName: opts.name || getPersona(opts.persona).label,
     persona: opts.persona,
     personas: opts.personas.length ? opts.personas : [opts.persona],
@@ -99,22 +107,36 @@ export function buildMausamAiContext(opts: {
   };
 }
 
-function demoNote(w: Warning): string {
-  return w.source === 'demo-simulation'
-    ? `(DEMO scenario - this is a simulated warning, not an official IMD bulletin)`
-    : `Source: India Meteorological Department`;
+/** Fills {placeholders} in a localized template string. */
+function fill(t: TDict, key: string, vars?: Record<string, string>): string {
+  const tmpl = t(key);
+  return vars ? tmpl.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? `{${k}}`) : tmpl;
 }
 
-function fmtWind(c: CurrentWeather | null): string {
-  if (!c) return 'Wind: n/a';
+const isFallbackMode = (mode: MausamAiContext['dataMode']): boolean => mode === 'fallback' || mode === 'demo';
+
+function warningNote(t: TDict, w: Warning): string {
+  return w.source === 'demo-simulation' ? t('ai.ans.demoNote') : t('ai.ans.demoSource');
+}
+
+function fmtWind(t: TDict, c: CurrentWeather | null): string {
+  if (!c) return t('ai.ans.noWind');
   const s = num(c.windSpeed);
-  return `Wind: ${s == null ? 'n/a' : round(s) + ' km/h'}${c.windDirection ? ' (' + c.windDirection + ')' : ''}`;
+  if (s == null) return t('ai.ans.noWind');
+  return c.windDirection
+    ? fill(t, 'ai.ans.windFmtDir', { speed: round(s), dir: c.windDirection })
+    : fill(t, 'ai.ans.windFmt', { speed: round(s) });
 }
 
-const NONE = 'I don\'t have that information from the current weather source.';
+const personaLabels = (ctx: MausamAiContext, t: TDict): string => ctx.personas.map((p) => t('persona.' + p)).join(' + ');
 
-export function answerIntent(intent: AiIntent, ctx: MausamAiContext): AiAnswer {
-  const { current, today, tomorrow, warnings, topWarning, safetyActive, result } = ctx;
+function fmtWhen(ctx: MausamAiContext, iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString(DATE_LOCALE[ctx.language], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+export function answerIntent(intent: AiIntent, ctx: MausamAiContext, t: TDict): AiAnswer {
+  const { current, today, tomorrow, topWarning, safetyActive, result } = ctx;
   const rainProb = num(today?.rainProb) ?? 0;
   const temp = num(current?.temperature) ?? num(today?.tMax);
   const feels = num(current?.feelsLike);
@@ -122,80 +144,83 @@ export function answerIntent(intent: AiIntent, ctx: MausamAiContext): AiAnswer {
   const vis = num(current?.visibility);
   const tmax = num(today?.tMax);
   const tmin = num(today?.tMin);
+  const evs = (v: number | null | undefined): string => (v == null ? t('ai.ans.na') : round(v));
 
-  const profileLine = () =>
-    `You're viewing MAUSAM as ${ctx.personas.map((p) => getPersona(p).label).join(' + ')} for ${ctx.locationLabel}.`;
+  const profileLine = () => fill(t, 'ai.ans.profileLine', { personas: personaLabels(ctx, t), location: ctx.locationLabel });
   const warningLine = () =>
     topWarning
-      ? `${topWarning.event} (${topWarning.severity.toUpperCase()}) for ${topWarning.area || ctx.locationLabel}. ${demoNote(topWarning)}`
-      : `No official warning is active for ${ctx.locationLabel}.`;
+      ? fill(t, 'ai.ans.warningLine', {
+          event: topWarning.event,
+          severity: topWarning.severity.toUpperCase(),
+          area: topWarning.area || ctx.locationLabel,
+          note: warningNote(t, topWarning)
+        })
+      : fill(t, 'ai.ans.noWarning', { location: ctx.locationLabel });
 
   switch (intent) {
     case 'greeting': {
       const lines: string[] = [];
-      lines.push(`${result.recommendation.headline || `Today's weather at a glance`}.`);
+      lines.push(`${result.recommendation.headline || t('ai.ans.greeting.atGlance')}.`);
       lines.push(profileLine());
-      if (safetyActive && topWarning) lines.push(`⚠️ Safety first: ${topWarning.event} (${topWarning.severity.toUpperCase()}).`);
-      lines.push(`${result.recommendation.text}`);
+      if (safetyActive && topWarning) lines.push(fill(t, 'ai.ans.safetyFirst', { event: topWarning.event, severity: topWarning.severity.toUpperCase() }));
+      lines.push(result.recommendation.text);
       return { intent, text: lines.join('\n'), basis: ['ai.basis.forecast', 'ai.basis.current', 'ai.basis.profile', 'ai.basis.warnings'] };
     }
 
     case 'best_time': {
       const wnd = result.recommendation.window;
       const lines: string[] = [];
+      lines.push(wnd ? fill(t, 'ai.ans.best.window', { window: wnd }) : t('ai.ans.best.nowindow'));
       lines.push(
-        `Based on the current forecast${wnd ? ', the recommended window is **' + wnd + '**' : ''}.`
+        fill(t, 'ai.ans.best.metrics', {
+          temp: evs(temp),
+          rain: round(rainProb),
+          wind: fmtWind(t, current),
+          humidity: hum != null ? fill(t, 'ai.ans.best.humidity', { humidity: round(hum) }) : ''
+        })
       );
-      lines.push(
-        `Temperature: ${temp == null ? 'n/a' : round(temp) + '°C'} · Rain probability: ${round(rainProb)}% · ${fmtWind(current)}` +
-          (hum != null ? ` · Humidity: ${round(hum)}%` : '')
-      );
-      lines.push(`UV: ${NONE}`);
-      lines.push('Conditions can change - always check the latest forecast before heading out.');
+      lines.push(t('ai.ans.best.uvNone'));
+      lines.push(t('ai.ans.best.footer'));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.profile', 'ai.basis.requirements', 'ai.basis.forecast', 'ai.basis.current'] };
     }
 
     case 'rain_today': {
       const lines: string[] = [];
       if (rainProb > 50) {
-        lines.push(`Rain is likely today (${round(rainProb)}% chance).`);
-        lines.push(
-          `Rainfall expected: ${today?.rainfall != null ? round(today.rainfall) + ' mm' : NONE.replace('.', '')}.`
-        );
-        lines.push('Plan a rain cover for outdoor plans and check MAUSAM alerts for updates.');
+        lines.push(fill(t, 'ai.ans.rain.likely', { prob: round(rainProb) }));
+        lines.push(today?.rainfall != null ? fill(t, 'ai.ans.rain.rainfall', { rainfall: round(today.rainfall) }) : t('ai.ans.none').replace(/\.$/, ''));
+        lines.push(t('ai.ans.rain.cover'));
       } else if (rainProb > 20) {
-        lines.push(`A rain chance of ${round(rainProb)}% exists today - carry light protection.`);
+        lines.push(fill(t, 'ai.ans.rain.chance', { prob: round(rainProb) }));
       } else {
-        lines.push(`Rain probability today is low (${round(rainProb)}%).`);
+        lines.push(fill(t, 'ai.ans.rain.low', { prob: round(rainProb) }));
       }
       if (safetyActive && topWarning) lines.push(`⚠️ ${warningLine()}`);
-      lines.push(`Source: ${today ? 'our forecast source' : NONE.replace('.', '')}.`);
+      lines.push(t('ai.ans.rain.source'));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.current', 'ai.basis.forecast', 'ai.basis.warnings'] };
     }
 
     case 'rain_tomorrow': {
       if (!tomorrow) {
-        return { intent, text: `I don't have a tomorrow forecast ${NONE.toLowerCase().replace('i don\'t have that information ', '')}.`, basis: ['ai.basis.forecast'] };
+        return { intent, text: t('ai.ans.rain.tomorrowNone'), basis: ['ai.basis.forecast'] };
       }
       const rp = num(tomorrow.rainProb) ?? 0;
       const lines = [
-        `Tomorrow (${tomorrow.weekday}): rain probability ${round(rp)}%.`,
-        `Expected ${tomorrow.condition || 'conditions'}, max ${round(tomorrow.tMax)}°C / min ${round(tomorrow.tMin)}°C.`
+        fill(t, 'ai.ans.rain.tomorrowMain', { day: tomorrow.weekday, prob: round(rp) }),
+        fill(t, 'ai.ans.rain.tomorrowTemp', { condition: tomorrow.condition || 'conditions', max: round(tomorrow.tMax), min: round(tomorrow.tMin) })
       ];
-      if (rp > 50) lines.push('Keep rain protection ready for tomorrow.');
+      if (rp > 50) lines.push(t('ai.ans.rain.tomorrowCover'));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.forecast'] };
     }
 
     case 'forecast_today': {
       const lines: string[] = [];
       if (!today) {
-        lines.push(NONE);
-        lines.push('The 5-day forecast needs the IMD forecast feed, which is not available from the current source.');
+        lines.push(t('ai.ans.none'));
+        lines.push(t('ai.ans.forecast.todayNone'));
       } else {
-        lines.push(
-          `${today.weekday} · ${today.condition || 'forecast available'}\nMax ${round(tmax)}°C / Min ${round(tmin)}°C · Rain ${round(rainProb)}%`
-        );
-        if (hum != null) lines.push(`Humidity: ${round(hum)}%`);
+        lines.push(fill(t, 'ai.ans.forecast.todayLine', { day: today.weekday, condition: today.condition || 'forecast available', max: round(tmax), min: round(tmin), rain: round(rainProb) }));
+        if (hum != null) lines.push(fill(t, 'ai.ans.forecast.todayHumidity', { humidity: round(hum) }));
       }
       if (safetyActive && topWarning) lines.push(`⚠️ ${warningLine()}`);
       return { intent, text: lines.join('\n'), basis: ['ai.basis.current', 'ai.basis.forecast', 'ai.basis.warnings'] };
@@ -204,44 +229,45 @@ export function answerIntent(intent: AiIntent, ctx: MausamAiContext): AiAnswer {
     case 'forecast_week': {
       const lines: string[] = [];
       if (!ctx.forecast.length) {
-        lines.push(NONE);
-        lines.push('The multi-day forecast is not available from the current weather source.');
+        lines.push(t('ai.ans.none'));
+        lines.push(t('ai.ans.forecast.weekNone'));
       } else {
         ctx.forecast.slice(0, 5).forEach((d) => {
-          lines.push(`${d.weekday}: ${d.condition || '--'} · ${round(d.tMax)}°/${round(d.tMin)}° · rain ${round(d.rainProb)}%`);
+          lines.push(fill(t, 'ai.ans.forecast.weekDay', { day: d.weekday, condition: d.condition || '--', max: round(d.tMax), min: round(d.tMin), rain: round(d.rainProb) }));
         });
-        lines.push('This is the outlook MAUSAM currently receives; check IMD for a formal forecast.');
+        lines.push(t('ai.ans.forecast.weekNote'));
       }
       return { intent, text: lines.join('\n'), basis: ['ai.basis.forecast'] };
     }
 
     case 'current_conditions': {
       if (!current) {
-        return { intent, text: NONE + '\nNo current observation is available for this location from the current source.', basis: ['ai.basis.current'] };
+        return { intent, text: t('ai.ans.none') + '\n' + t('ai.ans.current.none'), basis: ['ai.basis.current'] };
       }
       const lines = [
-        `At ${ctx.locationLabel}: ${current.weatherCondition || 'conditions observed'}, ${round(current.temperature)}°C${feels != null ? ` (feels like ${round(feels)}°C)` : ''}.`,
-        `${fmtWind(current)}`,
-        `Humidity: ${hum != null ? round(hum) + '%' : 'n/a'} · Visibility: ${vis != null ? vis.toFixed(1) + ' km' : 'n/a'}`,
-        `Rain probability today: ${round(rainProb)}%`
+        fill(t, 'ai.ans.current.main', {
+          location: ctx.locationLabel,
+          condition: current.weatherCondition || 'conditions observed',
+          temp: round(current.temperature),
+          feels: feels != null ? fill(t, 'ai.ans.current.feels', { feels: round(feels) }) : ''
+        }),
+        fmtWind(t, current),
+        fill(t, 'ai.ans.current.humvis', { humidity: hum != null ? round(hum) : t('ai.ans.na'), visibility: vis != null ? vis.toFixed(1) : t('ai.ans.na') }),
+        fill(t, 'ai.ans.current.rainProb', { rain: round(rainProb) })
       ];
       if (safetyActive && topWarning) lines.push(`⚠️ ${warningLine()}`);
-      lines.push(`Source: ${ctx.dataMode === 'fallback' || ctx.dataMode === 'demo' ? 'MAUSAM simulator (clearly labelled) - live IMD observation not available for this location' : 'IMD'}.`);
+      lines.push(fill(t, 'ai.ans.sourceLabel', { source: isFallbackMode(ctx.dataMode) ? t('ai.ans.current.sourceSim') : t('ai.ans.demoSource') }));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.current', 'ai.basis.location'] };
     }
 
     case 'uv':
-      return {
-        intent,
-        text: `UV index ${NONE}`,
-        basis: ['ai.basis.current']
-      };
+      return { intent, text: t('ai.ans.uv'), basis: ['ai.basis.current'] };
 
     case 'wind': {
       const ws = num(current?.windSpeed);
       return {
         intent,
-        text: `${fmtWind(current)}${ws == null ? '\n' + NONE : ` \u00b7 affects outdoor comfort and commute today.`}`,
+        text: `${fmtWind(t, current)}${ws == null ? '\n' + t('ai.ans.none') : ' · ' + t('ai.ans.wind.extra')}`,
         basis: ['ai.basis.current']
       };
     }
@@ -250,7 +276,7 @@ export function answerIntent(intent: AiIntent, ctx: MausamAiContext): AiAnswer {
       const vs = num(current?.visibility);
       return {
         intent,
-        text: `Visibility ${vs != null ? vs.toFixed(1) + ' km' : NONE.toLowerCase().replace('i don\'t have that information ', 'not available')}${vs != null && vs < 2 ? ' - low visibility, drive with care.' : vs != null ? ' - within typical range.' : ''}`,
+        text: `Visibility ${vs != null ? vs.toFixed(1) + ' km' : t('ai.ans.vis.notAvailable')}${vs != null && vs < 2 ? ' - ' + t('ai.ans.vis.low') : vs != null ? ' - ' + t('ai.ans.vis.ok') : ''}`,
         basis: ['ai.basis.current']
       };
     }
@@ -258,54 +284,55 @@ export function answerIntent(intent: AiIntent, ctx: MausamAiContext): AiAnswer {
     case 'air_quality':
       return {
         intent,
-        text: `Air quality ${NONE}.\nAQI needs a thematic data source which is not available from the current IMD source.`,
+        text: `${t('ai.ans.air.main')}\n${t('ai.ans.air.note')}`,
         basis: ['ai.basis.current']
       };
 
     case 'commute': {
       const lines: string[] = [];
-      lines.push(
-        `Current conditions for your commute: ${current?.weatherCondition || 'n/a'}, ${temp == null ? 'n/a' : round(temp) + '°C'}.`
-      );
-      lines.push(`Rain probability ${round(rainProb)}%${vis != null ? ` · Visibility ${vis.toFixed(1)} km` : ''}.`);
-      if (rainProb > 40) lines.push('Rain risk is elevated for the commute window - allow extra travel time.');
-      if (ctx.nowcount > 0) lines.push(`I also checked the available nowcast bulletins (${ctx.nowcount} issued for the area).`);
-      lines.push(`Warnings: ${warningLine()}`);
+      lines.push(fill(t, 'ai.ans.commute.main', { condition: current?.weatherCondition || t('ai.ans.na'), temp: evs(temp) }));
+      lines.push(fill(t, 'ai.ans.commute.rainVis', { rain: round(rainProb), vis: vis != null ? fill(t, 'ai.ans.commute.vis', { visibility: vis.toFixed(1) }) : '' }));
+      if (rainProb > 40) lines.push(t('ai.ans.commute.rainRisk'));
+      if (ctx.nowcount > 0) lines.push(fill(t, 'ai.ans.commute.nowcast', { count: String(ctx.nowcount) }));
+      lines.push(fill(t, 'ai.ans.commute.warnings', { warning: warningLine() }));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.profile', 'ai.basis.current', 'ai.basis.forecast', 'ai.basis.warnings'] };
     }
 
     case 'field_work': {
       const lines: string[] = [];
       if (rainProb > 45) {
-        lines.push(`Based on the available forecast, rainfall is expected (${round(rainProb)}% probability).`);
-        lines.push('You may want to review outdoor field work plans accordingly.');
+        lines.push(fill(t, 'ai.ans.field.rain', { prob: round(rainProb) }));
+        lines.push(t('ai.ans.field.review'));
       } else if ((temp ?? 99) > 40) {
-        lines.push(`High heat expected (${round(temp)}°C) - schedule labour for early morning or evening.`);
+        lines.push(fill(t, 'ai.ans.field.heat', { temp: evs(temp) }));
       } else {
-        lines.push(`Moderate conditions (${round(temp)}°C, ${round(rainProb)}% rain) - field work looks workable today.`);
+        lines.push(fill(t, 'ai.ans.field.moderate', { temp: evs(temp), rain: round(rainProb) }));
       }
-      lines.push('This is a general weather note from MAUSAM, not crop or soil advice. Check IMD Agromet (MeghDoot) advisories for crop-specific guidance.');
+      lines.push(t('ai.ans.field.note'));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.profile', 'ai.basis.requirements', 'ai.basis.current', 'ai.basis.forecast'] };
     }
 
     case 'aviation': {
       const windSpd = num(current?.windSpeed);
       const lines: string[] = [
-        'Current available aviation-relevant information:',
-        `\u2022 Wind: ${windSpd == null ? 'n/a' : round(windSpd) + ' km/h'}${current?.windDirection ? ' (' + current.windDirection + ')' : ''}`,
-        `\u2022 Visibility: ${vis != null ? vis.toFixed(1) + ' km' : 'n/a'}`,
+        t('ai.ans.aviation.head'),
+        fill(t, 'ai.ans.aviation.wind', {
+          wind: windSpd == null ? t('ai.ans.na') : round(windSpd),
+          direction: current?.windDirection ? fill(t, 'ai.ans.aviation.dir', { direction: current.windDirection }) : ''
+        }),
+        fill(t, 'ai.ans.aviation.visibility', { visibility: vis != null ? vis.toFixed(1) : t('ai.ans.na') }),
         `\u2022 ${warningLine()}`
       ];
-      lines.push('For operational aviation decisions, always use official aviation weather sources (METAR/TAF via IMD) - those feeds are not available from the current source.');
+      lines.push(t('ai.ans.aviation.note'));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.profile', 'ai.basis.current', 'ai.basis.warnings'] };
     }
 
     case 'beach': {
       const windSpd = num(current?.windSpeed);
       const lines: string[] = [
-        `Beach outlook: wind ${windSpd == null ? 'n/a' : round(windSpd) + ' km/h'}, temperature ${temp == null ? 'n/a' : round(temp) + '°C'}.`
+        fill(t, 'ai.ans.beach.main', { wind: windSpd == null ? t('ai.ans.na') : round(windSpd), temp: evs(temp) })
       ];
-      lines.push('Real-time wave/tide data needs the IMD marine API (not available from the current source) - beach guidance uses wind and storm outlook only.');
+      lines.push(t('ai.ans.beach.note'));
       if (safetyActive && topWarning) lines.push(`⚠️ ${warningLine()}`);
       return { intent, text: lines.join('\n'), basis: ['ai.basis.profile', 'ai.basis.current', 'ai.basis.warnings'] };
     }
@@ -314,36 +341,36 @@ export function answerIntent(intent: AiIntent, ctx: MausamAiContext): AiAnswer {
       const lines: string[] = [];
       if (safetyActive && topWarning) {
         lines.push(warningLine());
-        lines.push('Personalized insights move below this safety information.');
+        lines.push(t('ai.ans.warnings.safetyBelow'));
       } else {
-        lines.push(`No active official warning for ${ctx.locationLabel}.`);
-        if (ctx.nowcount > 0) lines.push(`I also checked the available nowcast bulletins (${ctx.nowcount} issued).`);
-        else lines.push(`No nowcast bulletins are available from the current source.`);
+        lines.push(fill(t, 'ai.ans.warnings.none', { location: ctx.locationLabel }));
+        if (ctx.nowcount > 0) lines.push(fill(t, 'ai.ans.warnings.nowcast', { count: String(ctx.nowcount) }));
+        else lines.push(t('ai.ans.warnings.noNowcast'));
       }
       return { intent, text: lines.join('\n'), basis: ['ai.basis.warnings'] };
     }
 
     case 'explain_warning': {
       if (!topWarning) {
-        return thisIntent('warnings_any', ctx);
+        return thisIntent('warnings_any', ctx, t);
       }
       const lines: string[] = [
-        `🚨 ${topWarning.event}`,
-        `Severity: ${topWarning.severity.toUpperCase()} · Area: ${topWarning.area || ctx.locationLabel}`,
-        `Valid from ${new Date(topWarning.validFrom).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} to ${new Date(topWarning.validUntil).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`
+        fill(t, 'ai.ans.explain.event', { event: topWarning.event }),
+        fill(t, 'ai.ans.explain.sev', { severity: topWarning.severity.toUpperCase(), area: topWarning.area || ctx.locationLabel }),
+        fill(t, 'ai.ans.explain.valid', { from: fmtWhen(ctx, topWarning.validFrom), until: fmtWhen(ctx, topWarning.validUntil) })
       ];
       if (topWarning.detail) lines.push(topWarning.detail);
-      lines.push(demoNote(topWarning));
-      lines.push('This official information always takes priority over personalized recommendations.');
+      lines.push(warningNote(t, topWarning));
+      lines.push(t('ai.ans.explain.priority'));
       return { intent, text: lines.join('\n'), basis: ['ai.basis.warnings'] };
     }
 
     case 'why': {
       const why = result.recommendation.why.slice(0, 4);
       const lines: string[] = [
-        'Here is why MAUSAM answers this way:',
+        t('ai.ans.why.head'),
         ...why.map((r) => `${r.ok ? '✓' : '·'} ${r.text}`),
-        'I only reuse data the app already shows you - I do not invent temperature, rainfall, AQI, warnings, UV or wind.'
+        t('ai.ans.why.footer')
       ];
       return {
         intent,
@@ -354,18 +381,14 @@ export function answerIntent(intent: AiIntent, ctx: MausamAiContext): AiAnswer {
 
     case 'help':
     default: {
-      const lines: string[] = [
-        "I'm MAUSAM AI - the weather intelligence assistant for this app.",
-        'I answer only from the actual weather data MAUSAM shows you (IMD where live, otherwise clearly-labelled simulated data). I\'m not a general chatbot.',
-        'Try one of the suggested questions below, or ask about warnings, rain, wind, forecast or your commute.'
-      ];
+      const lines: string[] = [t('ai.ans.help.one'), t('ai.ans.help.two'), t('ai.ans.help.three')];
       return { intent: 'help', text: lines.join('\n'), basis: ['ai.basis.current', 'ai.basis.forecast', 'ai.basis.warnings'] };
     }
   }
 }
 
-function thisIntent(i: AiIntent, ctx: MausamAiContext): AiAnswer {
-  return answerIntent(i, ctx);
+function thisIntent(i: AiIntent, ctx: MausamAiContext, t: TDict): AiAnswer {
+  return answerIntent(i, ctx, t);
 }
 
 /** Persona-aware quick questions. */
@@ -408,23 +431,25 @@ export const INTENT_LABEL_KEY: Record<AiIntent, string> = {
   help: 'ai.q.help'
 };
 
+/** Keyword intent matching (English + Hindi + Punjabi). */
 export function intentFromText(raw: string): AiIntent {
   const s = raw.toLowerCase();
-  if (/\b(warn|alert|warning)\b/.test(s)) return 'warnings_any';
-  if (/\bwhy\b/.test(s)) return 'why';
-  if (/\b(tomorrow)\b/.test(s) && /\b(rain|wet|shower)\b/.test(s)) return 'rain_tomorrow';
-  if (/\b(5.day|week|next days|7.day|outlook)\b/.test(s) && /\b(forecast|weather|rain)\b/.test(s)) return 'forecast_week';
-  if (/\b(forecast|predict)\b/.test(s) || (/\b(today)\b/.test(s) && /\b(weather)\b/.test(s))) return 'forecast_today';
-  if (/\b(best|window|run|outdoor|time to)\b/.test(s)) return 'best_time';
-  if (/\b(uv|sunburn)\b/.test(s)) return 'uv';
-  if (/\b(wind|windy|gust)\b/.test(s)) return 'wind';
-  if (/\b(visibility|fog)\b/.test(s)) return 'visibility';
-  if (/\b(air|aqi|pollution|quality)\b/.test(s)) return 'air_quality';
-  if (/\b(commute|traffic|drive|route|road)\b/.test(s)) return 'commute';
-  if (/\b(field|farm|plant|water|crop)\b/.test(s)) return 'field_work';
-  if (/\b(flight|airport|aviation|pilot|metar)\b/.test(s)) return 'aviation';
-  if (/\b(beach|sea|wave|coast|tide)\b/.test(s)) return 'beach';
-  if (/\b(current|now|conditions)\b/.test(s)) return 'current_conditions';
-  if (/^(hi|hello|hey|namaste|good)/.test(s)) return 'greeting';
+  const has = (...words: string[]) => words.some((w) => s.includes(w));
+  if (has('warn', 'alert', 'warning', 'चेतावनी', 'अलर्ट', 'ਚੇਤਾਵਨੀ', 'ਅਲਰਟ')) return 'warnings_any';
+  if (has('why', 'क्यों', 'क्यूं', 'क्यो', 'ਕਿਉਂ')) return 'why';
+  if (has('tomorrow', 'कल', 'ਕੱਲ੍ਹ') && has('rain', 'wet', 'shower', 'बारिश', 'बरसात', 'मीਂਹ', 'ਬਾਰਿਸ਼', 'ਮੀਂਹ')) return 'rain_tomorrow';
+  if (has('5-day', '5 day', 'week', 'next days', '7-day', '7 day', 'outlook', 'हफ्ता', 'ਹਫਤਾ', 'ਸਪਤਾਹ') && has('forecast', 'weather', 'rain', 'पूर्वानुमान', 'ਮੌਸਮ', 'ਪੂਰਵ ਅਨੁਮਾਨ')) return 'forecast_week';
+  if (has('forecast', 'predict', 'पूर्वानुमान', 'ਪੂਰਵ ਅਨੁਮਾਨ') || (has('today', 'आज', 'ਅੱਜ') && has('weather', 'मौसम', 'ਮੌਸਮ'))) return 'forecast_today';
+  if (has('best', 'window', 'run', 'outdoor', 'time to', 'सबसे अच्छा', 'ਵਧੀਆ')) return 'best_time';
+  if (has('uv', 'sunburn')) return 'uv';
+  if (has('wind', 'windy', 'gust', 'हवा', 'ਹਵਾ', 'ਤੇਜ਼ ਹਵਾ')) return 'wind';
+  if (has('visibility', 'fog', 'दृश्यता', 'कोहरा', 'ਦਿੱਖ', 'ਧੁੰਦ')) return 'visibility';
+  if (has('air', 'aqi', 'pollution', 'quality', 'वायु')) return 'air_quality';
+  if (has('commute', 'traffic', 'drive', 'route', 'road', 'आवागमन', 'रास्ता', 'ਆਵਾਜਾਈ', 'ਰਸਤਾ')) return 'commute';
+  if (has('field', 'farm', 'plant', 'water', 'crop', 'खेत', 'ਖੇਤ')) return 'field_work';
+  if (has('flight', 'airport', 'aviation', 'pilot', 'metar', 'विमानन', 'ਏਵੀਏਸ਼ਨ')) return 'aviation';
+  if (has('beach', 'sea', 'wave', 'coast', 'tide', 'समुद्र', 'ਬੀਚ')) return 'beach';
+  if (has('current', 'now', 'conditions', 'अभी', 'ਹੁਣ')) return 'current_conditions';
+  if (/^(hi|hello|hey|namaste|good|नमस्ते|हैलो|ਸਤ|ਸਤਸ੍ਰੀ)/.test(s)) return 'greeting';
   return 'help';
 }

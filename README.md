@@ -9,6 +9,8 @@ persona/requirements/location/time — using **real India Meteorological Departm
 data wherever it can be reached without an API key, and **clearly labelled
 fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 
+> 🌐 **Live demo (GitHub Pages):** https://abhinavpandey0507.github.io/MAUSAM-MVP/
+
 ---
 
 ## 1. What it does (TL;DR)
@@ -25,11 +27,13 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 | 8 | Fallback deterministic simulator, always labelled | ✅ |
 | 9 | Profile editing + Privacy & Data Control (edit / delete profile, notification & location controls) | ✅ |
 | 10 | Persona switching recomputes the homepage instantly (no reload) | ✅ |
-| 11 | Floating **MAUSAM AI** assistant — person-aware, data-grounded (never invents weather), quick questions, "Why this answer?" transparency | ✅ |
-| 12 | MAUSAM AI warning override — surfaces official/demo severe warnings with "Explain Warning" / "View Official Alert" | ✅ |
-| 13 | Voice-ready assistant (mic → "coming soon") + calm proactive insight bubble (1 at a time) | ✅ |
+| 11 | Floating **MAUSAM AI** robot assistant — person-aware, data-grounded (never invents weather), quick questions, "Why this answer?" transparency, weather-reactive environment | ✅ |
+| 12 | MAUSAM AI warning override — red 🚨 robot state surfaces official/demo severe warnings with "Explain Warning" / "View Official Alert" | ✅ |
+| 13 | **Voice** assistant — mic (Speech Recognition) + spoken replies (TTS) with Indian locales (en-IN / hi-IN / pa-IN), graceful fallback where unsupported | ✅ |
 | 14 | Official branding: Ministry of Earth Sciences · IMD header/footer + "Prototype for Smart India Hackathon 2026" (no false official claim) | ✅ |
-| 15 | i18n — English / हिन्दी / ਪੰਜਾਬੀ (incl. onboarding, personas, requirements, assistant chrome) | ✅ |
+| 15 | i18n — English / हिन्दी / ਪੰਜਾਬੀ for the **entire** UI *and* every MAUSAM AI answer (weather phrasing, dates, warnings, commute, comfort metrics) | ✅ |
+| 16 | **Immersive weather environment** — animated sky backdrop (clouds / rain / fog / lightning / stars, day-night tint) that mirrors the live conditions behind every page | ✅ |
+| 17 | One-time **AI intro card** ("Meet your weather AI") that greets the user by name, explains the anti-fabrication honesty rule, then never reappears | ✅ |
 
 ---
 
@@ -40,13 +44,22 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 > On Windows, `npm.ps1` is often blocked by the PowerShell execution policy —
 > use **`npm.cmd`** instead of `npm`.
 
-### Option 0 — Try it live (Render, ~2 minutes)
+### Option 0 — Try it live (GitHub Pages)
 
-1. Push this repo to GitHub (already done — see the link above).
-2. Go to **render.com** → **New +** → **Blueprint** → connect the `MAUSAM-MVP` repo.
-3. Render finds `render.yaml` automatically → click **Apply**.
-4. Wait for the build (~3–4 min) → open your public URL
-   (`https://mausam-mvp.onrender.com` by default).
+**No setup needed:** https://abhinavpandey0507.github.io/MAUSAM-MVP/
+
+> The static build runs fully client-side: personalization, MAUSAM AI, voice, the
+> immersive environment and the demo simulator all work in the browser. Live IMD
+> radar/satellite images load directly from `mausam.imd.gov.in`.
+>
+> For the full backend (IMD v1 JSON APIs + server-side observation scrape), also deploy
+> the Render blueprint:
+>
+> 1. Push this repo to GitHub (already done — see the link above).
+> 2. Go to **render.com** → **New +** → **Blueprint** → connect the `MAUSAM-MVP` repo.
+> 3. Render finds `render.yaml` automatically → click **Apply**.
+> 4. Wait for the build (~3–4 min) → open your public URL
+>    (`https://mausam-mvp.onrender.com` by default).
 
 > Live IMD scraping runs best from India; from overseas hosts it may be unreachable —
 > the app then shows clearly-labelled simulated data, exactly as designed. The
@@ -123,18 +136,24 @@ live; everything else falls back to the labelled simulator.
    **weighted average** and blends the widget order live.
 6. **Severe demo** → a clearly-labelled **demo warning** jumps to **priority 0** above the
    recommendation, pushing personalization below the safety information.
-7. **MAUSAM AI** (bottom-right, "Ask MAUSAM") → greeting answer uses real values
+7. **MAUSAM AI** (bottom-right robot, "Ask MAUSAM") → first tap shows a one-time **intro card**
+   ("Meet your weather AI", greets you by name + honesty rule). Greeting answer uses real values
    ("Based on your Runner profile, today's morning conditions are currently more favorable…").
    Ask **"Why?"** → the assistant lists the profile/forecast basis. Switch persona → the
    assistant re-greets for the new persona. Quick questions adapt per persona
-   (Runner → "Best time today?", Driver → "How is my commute?", etc.).
+   (Runner → "Best time today?", Driver → "How is my commute?", etc.). The robot **reacts to the
+   weather**: listening (green), speaking (talking mouth), thinking (radar scan), severe (red).
 8. **Radar** → live IMD Doppler loops (SRI / MAXZ). **Satellite** → live INSAT-3D image.
 9. On **Alerts** a green `NO WARNING` chip shows when no official warning exists.
-10. **Severe demo** → MAUSAM AI switches to a red 🚨 state ("There's an active official weather
-   warning…") with **Explain Warning** / **View Official Alert**, and the homepage shows the
-   demo warning at priority-0 — safety always overrides personalization.
-11. **Honesty rule**: UV / AQI answers say *"I don't have that information from the current
-   weather source."* Nothing invented is presented as live.
+10. **Severe demo** → MAUSAM AI switches to a red 🚨 robot state ("There's an active official weather
+    warning…") with **Explain Warning** / **View Official Alert**, and the homepage shows the
+    demo warning at priority-0 — safety always overrides personalization.
+11. **Voice** (Settings → Voice Assistant) → speak a question in the app language; MAUSAM answers
+    out loud (en-IN / hi-IN / pa-IN voices). Browsers without Speech APIs show a friendly hint.
+12. **Honesty rule**: UV / AQI answers say *"I don't have that information from the current
+    weather source."* Nothing invented is presented as live.
+13. **Environment** — switch language to हिन्दी or ਪੰਜਾਬੀ: the whole UI *and* every AI answer
+    switch, while the sky backdrop keeps mirroring the weather (rain ☔, clouds ☁, stars ✨…).
 
 ---
 
@@ -194,14 +213,18 @@ client/                         React 18 + Vite + Tailwind (TS)
   src/
     pages/                      Onboarding (6-step wizard), Home, Forecast, Nowcast,
                                 Alerts, Radar, Satellite, Demo, Profile, Settings
-    ai/mausamAi.ts              data-grounded answer engine (context → persona-aware answers)
-    components/                 TopBar, BottomNav, AppFooter, MausamAi (floating assistant),
+    ai/mausamAi.ts              data-grounded answer engine (context → persona-aware answers,
+                                fully localized en / hi / pa)
+    components/                 TopBar, BottomNav, AppFooter, MausamAi (floating robot
+                                assistant w/ voice), WeatherEnvironment (animated backdrop),
                                 PersonalizedInsight, cards/*, LocationPicker,
                                 PersonaPicker, Modal, WhyButton…
+    services/voice.ts           Speech Recognition + TTS (en-IN / hi-IN / pa-IN)
+    weather/environmentEngine.ts day/night + condition → sky scene (clouds/rain/fog/storm/stars)
     data/                       personas.ts (14), requirements.ts (catalog + boosts)
     personalization/            engine.ts (weights + scoring), recommendations.ts
-    i18n/translations.ts        en / hi / pa
-    context/AppContext.tsx      state + localStorage + onboarding gate + demo severe
+    i18n/translations.ts        en / hi / pa (UI + every AI answer + robot copy)
+    context/AppContext.tsx      state + localStorage + onboarding gate + demo severe + voice prefs
     services/api.ts             typed API client
 ```
 
@@ -209,6 +232,9 @@ client/                         React 18 + Vite + Tailwind (TS)
 
 ## 7. Notes & known limits
 
+- The GitHub Pages build runs without a backend: `client/src/services/api.ts` detects the
+  static host and serves the labelled fallback simulator directly (radar/satellite remain
+  live IMD images). Deploying `server/` adds the IMD v1 JSON APIs + observation scrape.
 - IMD v1 API responses depend on an IP/domain whitelist + bearer key; without them the
   server returns **401**, which is detected and labelled, never shown raw.
 - The homepage scrape is a tolerant best-effort parse — it may stop working if IMD

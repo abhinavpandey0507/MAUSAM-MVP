@@ -13,7 +13,8 @@ const DEFAULT_PROFILE: Profile = {
   language: 'en',
   activity: '',
   notify: { alerts: true, daily: true, insights: true },
-  onboarded: false
+  onboarded: false,
+  assistantIntroSeen: false
 };
 
 const DEFAULT_STATE: AppState = {
@@ -22,6 +23,8 @@ const DEFAULT_STATE: AppState = {
   language: 'en',
   demoMode: false,
   severeSim: false,
+  voiceEnabled: true,
+  voiceAutoSpeak: false,
   profile: DEFAULT_PROFILE
 };
 
@@ -31,6 +34,8 @@ interface AppContextValue extends AppState {
   setLanguage: (l: Language) => void;
   setDemoMode: (v: boolean) => void;
   setSevereSim: (v: boolean) => void;
+  setVoiceEnabled: (v: boolean) => void;
+  setVoiceAutoSpeak: (v: boolean) => void;
   updateProfile: (patch: Partial<Profile>) => void;
   addPersona: (p: PersonaId) => void;
   removePersona: (p: PersonaId) => void;
@@ -105,6 +110,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLanguage: (language) => setState((s) => ({ ...s, language, profile: { ...s.profile, language } })),
       setDemoMode: (demoMode) => setState((s) => ({ ...s, demoMode })),
       setSevereSim: (severeSim) => setState((s) => ({ ...s, severeSim })),
+      setVoiceEnabled: (voiceEnabled) => setState((s) => ({ ...s, voiceEnabled })),
+      setVoiceAutoSpeak: (voiceAutoSpeak) => setState((s) => ({ ...s, voiceAutoSpeak })),
       updateProfile: (patch) => setState((s) => ({ ...s, profile: { ...s.profile, ...patch } })),
       addPersona: (p) =>
         setState((s) => {
