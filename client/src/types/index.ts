@@ -98,7 +98,6 @@ export interface LiveStatusInfo {
   observationScrape: string;
   radarProducts: string;
   satelliteImagery: string;
-  apiKeyConfigured: boolean;
   liveEnabled: boolean;
 }
 

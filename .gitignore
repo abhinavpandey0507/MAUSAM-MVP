@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+server/.venv/
+__pycache__/
+*.pyc
 
 # Build output
 client/dist/

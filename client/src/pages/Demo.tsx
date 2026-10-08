@@ -13,7 +13,6 @@ interface StatusShape {
   observationScrape: string;
   radarProducts: string;
   satelliteImagery: string;
-  apiKeyConfigured: boolean;
 }
 
 export function Demo() {
@@ -129,7 +128,7 @@ export function Demo() {
       {/* Live status board */}
       <section className="card fade-up mt-4 p-5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatusCell label="LIVE DATA" value={liveStatus ? (liveStatus.apiKeyConfigured ? 'IMD API KEY' : 'MIXED') : '—'} dot={liveStatus?.observationScrape === 'ok'} />
+          <StatusCell label="LIVE DATA" value={liveStatus ? (liveStatus.observationScrape === 'ok' ? 'LIVE' : 'MIXED / SIM') : '—'} dot={liveStatus?.observationScrape === 'ok'} />
           <StatusCell label="IMD SOURCE" value="INDIA MET. DEPT." dot={liveStatus?.observationScrape === 'ok'} />
           <StatusCell label={t('demo.persona')} value={PERSONAS.find((p) => p.id === persona)?.label.toUpperCase() ?? '—'} dot />
           <StatusCell label={t('demo.location')} value={LOCATIONS.find((l) => l.id === location)?.name.toUpperCase() ?? '—'} dot />

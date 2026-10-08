@@ -312,7 +312,6 @@ export function simulateWeatherEnvelope(locationId: string, demo: boolean, now =
         observationScrape: 'unreachable',
         radarProducts: 'unreachable',
         satelliteImagery: 'unreachable',
-        apiKeyConfigured: false,
         liveEnabled: false
       }
     }

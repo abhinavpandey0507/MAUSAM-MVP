@@ -23,7 +23,7 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 | 4 | "Why?" explanations on the recommendation + every reordered card | ✅ |
 | 5 | Live IMD observation scrape (New Delhi) | ✅ LIVE |
 | 6 | Live IMD Doppler radar loops (7 cities) + INSAT-3D satellite | ✅ LIVE |
-| 7 | IMD v1 JSON APIs (forecast / nowcast / warnings / rainfall) | 🔑 when `IMD_API_KEY` set |
+| 7 | IMD live sources — observation scrape, radar, satellite, legacy city/nowcast/warnings/rainfall APIs | ✅ 100% **key-less** (no API key anywhere) |
 | 8 | Fallback deterministic simulator, always labelled | ✅ |
 | 9 | Profile editing + Privacy & Data Control (edit / delete profile, notification & location controls) | ✅ |
 | 10 | Persona switching recomputes the homepage instantly (no reload) | ✅ |
@@ -52,7 +52,7 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 > immersive environment and the demo simulator all work in the browser. Live IMD
 > radar/satellite images load directly from `mausam.imd.gov.in`.
 >
-> For the full backend (IMD v1 JSON APIs + server-side observation scrape), also deploy
+> For the full backend (server-side observation scrape + IMD district APIs), also deploy
 > the Render blueprint:
 >
 > 1. Push this repo to GitHub (already done — see the link above).
@@ -61,25 +61,30 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 > 4. Wait for the build (~3–4 min) → open your public URL
 >    (`https://mausam-mvp.onrender.com` by default).
 
+> The backend is **Fully Key-less Python (FastAPI)** — it never needs an IMD API key.
 > Live IMD scraping runs best from India; from overseas hosts it may be unreachable —
 > the app then shows clearly-labelled simulated data, exactly as designed. The
 > personalization, onboarding, MAUSAM AI and warning-override demos work everywhere.
 
 ### Option A — Production (single server)
 
+> Requires **Python 3.10+** and **Node 18+**.
+
 ```bash
-# 1. Backend deps
+# 1. Python backend deps (virtualenv recommended)
 cd server
-npm.cmd install
+python -m venv .venv
+.venv\Scripts\activate          # (Windows)  /  source .venv/bin/activate  (macOS/Linux)
+pip install -r requirements.txt
 
 # 2. Frontend deps + build
 cd ..\client
 npm.cmd install
-npm.cmd run build        # outputs client/dist
+npm.cmd run build               # outputs client/dist
 
-# 3. Run the server (it serves the built app + /api)
+# 3. Run the FastAPI server (serves the built app + /api on :4000)
 cd ..\server
-npm.cmd start            # → http://localhost:4000
+.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 4000
 ```
 
 Open `http://localhost:4000`.
@@ -87,14 +92,14 @@ Open `http://localhost:4000`.
 ### Option B — Development (two processes, hot reload)
 
 ```bash
+# Terminal 1 — backend API on :4000 (after `pip install -r server/requirements.txt`)
 cd server
-npm.cmd install
-npm.cmd run dev          # API on :4000
+.venv\Scripts\python -m uvicorn app.main:app --reload
 
-# second terminal
+# Terminal 2 — frontend on :5173, proxies /api → :4000
 cd client
 npm.cmd install
-npm.cmd run dev          # Vite on :5173, proxies /api → :4000
+npm.cmd run dev
 ```
 
 Open `http://localhost:5173`.
@@ -103,20 +108,21 @@ Open `http://localhost:5173`.
 
 ## 3. Configuration
 
-Backend reads environment variables in `server/.env` (see `server/src/config.js`):
+The backend reads environment variables (set them before starting uvicorn; there is no
+`server/.env` file to avoid accidentally committing secrets):
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `PORT` | `4000` | Server port |
-| `ENABLE_LIVE_IMD` | `true` | Master switch for all live IMD attempts |
-| `IMD_API_KEY` | *(empty)* | Bearer key for `api.imd.gov.in/api/v1` + legacy `city.imd.gov.in` APIs |
-| `IMD_V1_BASE` | `https://api.imd.gov.in/api/v1` | v1 API base |
-| `IMD_LEGACY_BASE` | `https://city.imd.gov.in/api` | Legacy API base |
-| `IMD_CITY_BASE` | `https://city.imd.gov.in/citywx` | City weather endpoint |
-| `IMD_SITE_BASE` | `https://mausam.imd.gov.in` | Site used for observation/radar/satellite |
+| `ENABLE_LIVE_IMD` | `true` | Set to `false` to force the labelled simulator everywhere (judging mode) |
+| `IMD_V1_BASE` | `https://api.imd.gov.in/api/v1` | v1 API base (kept for status reporting; **no key is ever sent**) |
+| `IMD_LEGACY_BASE` | `https://mausam.imd.gov.in/api` | IMD district / legacy endpoints |
+| `IMD_CITY_BASE` | `https://city.imd.gov.in/api` | City weather endpoint |
+| `IMD_RADAR_BASE` | `https://mausam.imd.gov.in/ImagesForState-DWR` | Radar gallery base |
+| `IMD_SAT_BASE` | `https://mausam.imd.gov.in/ImagesForState-SAT` | Satellite gallery base |
 
-Without a key the app still works: radar, satellite and the New Delhi observation are
-live; everything else falls back to the labelled simulator.
+There is **no API key**: observation scrape, district legacy APIs, radar and satellite use
+public IMD URLs; anything that does not answer falls back to the labelled simulator.
 
 ---
 
@@ -164,17 +170,15 @@ homepage's: `IMD data → normalized weather → personalization engine → cont
 Every answer is built from the values already shown on-screen; where a value is absent it
 says *"I don't have that information from the current weather source."* The answer layer is
 deterministic for the MVP (no fabricated metrics), with an LLM-only-as-language-layer
-seam left in place for a future key.
+seam left in place for a future optional LLM.
 
-**LIVE — no key needed:**
-- Current observation for **New Delhi-Safdarjung** — scraped from the `id="city_weather"`
-  block of `https://mausam.imd.gov.in/` (strict parse; invalid/implausible values rejected).
-- **Radar** loops `https://mausam.imd.gov.in/Radar/animation/Converted/{CODE}_SRI.gif` /
-  `..._MAXZ.gif` (DELHI, MPT, KOL, CNI, HYD, MLR; Chandigarh uses DELHI fallback).
-- **Satellite** `https://mausam.imd.gov.in/Satellite/3Dasiasec_ir1.jpg` (INSAT-3D Asia IR-1).
-
-**LIVE — only when `IMD_API_KEY` is set (v1 + legacy APIs otherwise return HTTP 401):**
-- Current weather, city forecast, district nowcast, district warnings, district rainfall.
+**LIVE — no key needed (this backend is fully key-less):**
+- **Current observation** (New Delhi-Safdarjung and regional stations) — scraped from the
+  `id="city_weather"` block of the IMD site (strict parse; invalid/implausible values rejected).
+- **Radar** loops from the IMD radar **gallery (static)** under `ImagesForState-DWR`.
+- **Satellite** frames from the IMD satellite **gallery (static)** under `ImagesForState-SAT`.
+- **City forecast / district nowcast / district warnings / district rainfall** via IMD's
+  public legacy `*_api.php` endpoints (no key — always strictly validated + labelled).
 
 **DERIVED rules (not fabricated metrics):**
 - Personalization reordering, insights, outdoor-window, field-work score, fog risk,
@@ -182,8 +186,8 @@ seam left in place for a future key.
 
 **FALLBACK / DEMO — always labelled `SIMULATED` / `DEMO FALLBACK DATA`:**
 - Deterministic seasonal simulator (monthly climate normals per city + deterministic noise)
-  used when no live source answers — including current weather for cities other than
-  New Delhi unless a key is configured, and all warnings with no key.
+  used when no live source answers — including current weather for cities whose IMD
+  page is unreachable, and any warning source that does not answer.
 - Demo-mode severe warning (`source: 'demo-simulation'`).
 
 **Never fabricated:** UV index, AQI, pressure, visibility etc. are shown as
@@ -194,20 +198,20 @@ seam left in place for a future key.
 ## 6. Layout
 
 ```
-server/                         Express (ESM) backend :4000
-  src/
-    index.js                    app entry, serves client/dist + SPA fallback
-    config.js                   env config
-    data/stations.js            7 cities (ids, coords, radar codes, obs names)
-    cache/cache.js              in-memory TTL cache + ./api/status stats
-    imd/client.js               live-source attempts (v1 → scrape → legacy)
-    imd/parsers.js              tolerant IMD → normalized parsers
-    services/weatherService.js  aggregation, provenance (LIVE/SIMULATED)
-    services/mediaService.js    radar + satellite
-    personalization/engine.js   server mirror of the rule tables
-    demo/simulator.js           labelled deterministic fallback
-    routes/                     /api/{weather,forecast,nowcast,alerts,radar,
-                                satellite,locations,status,personalize,personas,health}
+server/                         Python 3 (FastAPI) backend :4000  — 100% key-less
+  requirements.txt              fastapi · uvicorn · httpx
+  app/
+    main.py                     FastAPI app, SafeJSONResponse (NaN→null), static SPA fallback
+    config.py                   env config (PORT, ENABLE_LIVE_IMD, IMD base URLs — no keys)
+    cache.py                    in-memory TTL cache + /api/status stats
+    stations.py                 7 cities (ids, coords, radar codes, obs names)
+    http_client.py              async httpx client + JS-compatible helpers
+    parsers.py                  tolerant IMD → normalized parsers
+    imd_client.py               key-less live-source attempts (scrape → legacy APIs)
+    media_service.py            radar + satellite (public gallery)
+    weather_service.py          aggregation, provenance (LIVE/SIMULATED)
+    simulator.py                labelled deterministic fallback (FNV-1a noise)
+    personalization.py          server mirror of the rule tables
 
 client/                         React 18 + Vite + Tailwind (TS)
   src/
@@ -234,16 +238,19 @@ client/                         React 18 + Vite + Tailwind (TS)
 
 - The GitHub Pages build runs without a backend: `client/src/services/api.ts` detects the
   static host and serves the labelled fallback simulator directly (radar/satellite remain
-  live IMD images). Deploying `server/` adds the IMD v1 JSON APIs + observation scrape.
-- IMD v1 API responses depend on an IP/domain whitelist + bearer key; without them the
-  server returns **401**, which is detected and labelled, never shown raw.
+  live IMD images). Deploying `server/` adds the server-side observation scrape + IMD
+  district/legacy APIs — again with **no API key**.
+- The source parsers are tolerant, best-effort — a scraping smudge is rejected instead of
+  shown as live; if IMD changes a page the app degrades to labelled simulation.
+- **NaN safety:** the FastAPI layer serializes any `NaN`/`Infinity` as `null` so the JSON
+  payload is always valid for the browser (`SafeJSONResponse` in `app/main.py`).
 - The homepage scrape is a tolerant best-effort parse — it may stop working if IMD
   changes the page structure; the app degrades to labelled simulation automatically.
 - All values from the simulator use per-city monthly climate normals and a seeded PRNG,
   so two runs of the same city/day/hour agree, but they are still *not* real observations.
 - Personal data (name, phone, email, roles, requirements, notifications, saved locations) is
   stored **only in `localStorage`** and never leaves the device; "Delete profile & data"
-  clears it. API credentials never leave the server.
+  clears it. The backend has no keys to store or leak.
 - Onboarding is shown until the profile is marked `onboarded`; features are reachable
   immediately after (no gaps to other pages first).
 
