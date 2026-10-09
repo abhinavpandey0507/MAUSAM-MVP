@@ -14,7 +14,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 
-from . import config, cache, imd_client, media_service, weather_service, personalization, simulator
+from . import config, cache, imd_client, media_service, weather_service, personalization, simulator, envelope, ingest
+from .api import router as api_router
+from .db import init_db
 from .http_client import jsonable, init_client, close_client
 from .stations import STATIONS, get_station
 
@@ -48,18 +50,28 @@ def _client_dist() -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_client()
+    init_db()
+    if not ingest.is_seeded():
+        try:
+            await ingest.ingest_all()
+        except Exception as exc:  # noqa: BLE001 - startup must not crash the API
+            print(f"[mausam] initial ingest failed: {exc}")
     yield
     await close_client()
 
 
 app = FastAPI(title="MAUSAM API", version="1.0.0", docs_url="/api/docs", lifespan=lifespan)
 
+_origins = os.getenv("CLIENT_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4000,http://127.0.0.1:4000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _origins.split(",") if o.strip()],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(api_router)
 
 
 @app.get("/api")
@@ -129,37 +141,46 @@ def _req_location(q: Request) -> str:
 async def weather(q: Request):
     loc = _req_location(q)
     demo = str(q.query_params.get("demo", "")).lower() in ("true", "1", "yes")
-    if demo or not config.is_live_enabled():
-        station = get_station(loc)
-        data = simulator.simulate_weather_bundle(station["id"], mode="demo" if demo else "fallback")
-        return _ok({"ok": True, "demo": bool(demo), "location": station["id"], "data": data})
-    result = await weather_service.get_weather(loc, opts={"demo": False})
-    if not result["ok"]:
-        return _http_error(502, "weather aggregation failed")
-    return _ok(result)
+    data = envelope.build_envelope(loc, demo)
+    if data is None:
+        return _http_error(404, "location not found")
+    return _ok({"ok": True, "demo": bool(demo), "location": data["locationId"], "data": data})
 
 
 @app.get("/api/alerts")
 async def alerts(q: Request):
     loc = _req_location(q)
     demo = str(q.query_params.get("demo", "")).lower() in ("true", "1", "yes")
-    w = await weather_service.get_weather(loc, opts={"demo": demo})
-    data = w["data"]
-    warnings = data.get("warnings") or []
+    station = get_station(loc)
+    from . import repository as repo
+
+    rows = repo.alerts_for(station["id"], active_only=True)
+    warnings = [
+        {
+            "severity": a["severity"],
+            "event": a["event"],
+            "area": a["area"],
+            "detail": a["detail"],
+            "validFrom": a["validFrom"],
+            "validUntil": a["validUntil"],
+            "source": "imd" if not a["isDemo"] else ("demo-simulation" if demo else "simulated"),
+        }
+        for a in rows
+    ]
     top = personalization.top_warning(warnings)
     return _ok(
         {
             "ok": True,
             "demo": demo,
-            "location": w["location"],
+            "location": station["id"],
             "data": {
                 "warnings": warnings,
                 "topWarning": top,
-                "nowcast": data.get("nowcast") or [],
-                "source": data.get("dataSourceLabel", "SIMULATED DATA"),
+                "nowcast": simulator.simulate_nowcast(station["id"]),
+                "source": "SQL dataset",
                 "meta": {
-                    "dataMode": data.get("dataMode", "fallback"),
-                    "lastUpdated": data.get("lastUpdated") or datetime.now(timezone.utc).isoformat(),
+                    "dataMode": "fallback" if all(a["isDemo"] for a in rows) or not rows else "mixed",
+                    "lastUpdated": datetime.now(timezone.utc).isoformat(),
                 },
             },
         }

@@ -4,9 +4,13 @@ server/.venv/
 __pycache__/
 *.pyc
 
+# Local SQLite dataset
+server/data/
+
 # Build output
 client/dist/
 client/.vite/
+client/tsconfig.tsbuildinfo
 
 # Environment / secrets
 server/.env

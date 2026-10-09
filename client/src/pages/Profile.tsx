@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Save, UserRound, Star, Trash2, Pencil } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { sqlApi } from '../services/sqlApi';
 import { makeT } from '../i18n/translations';
 import { LOCATIONS } from '../data/locations';
 import { uniqueRequirements } from '../data/requirements';
@@ -9,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 
 export function Profile() {
   const { language, profile, updateProfile, savedLocations, addSavedLocation, setLocation, resetProfile, setPersonas } = useApp();
+  const { isAuthenticated, updatePreferences } = useAuth();
   const t = makeT(language);
   const nav = useNavigate();
   const [name, setName] = useState(profile.name ?? '');
@@ -18,8 +21,15 @@ export function Profile() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const save = () => {
+  const save = async () => {
     updateProfile({ name, phone, email });
+    if (isAuthenticated) {
+      try {
+        await sqlApi.user.updateProfile(name.trim() || email.trim());
+      } catch {
+        /* local profile still saved even if sync fails */
+      }
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   };
@@ -95,6 +105,14 @@ export function Profile() {
               );
             })}
           </div>
+          {isAuthenticated && (
+            <button
+              onClick={() => updatePreferences({ preferredLocation: profile.personas.length ? savedLocations[0] ?? 'new-delhi' : 'new-delhi' }).catch(() => undefined)}
+              className="mt-2 inline-flex items-center gap-1 rounded-full bg-brand-50 px-3 py-1 text-[11px] font-bold text-brand-700 ring-1 ring-brand-100"
+            >
+              <Save className="h-3 w-3" /> Sync location with account
+            </button>
+          )}
         </div>
 
         <div>

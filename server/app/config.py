@@ -14,8 +14,9 @@ def _num(value, default: int) -> int:
 
 
 PORT = _num(os.getenv("PORT"), 4000)
-# Set to "false" to force demo simulation for all endpoints (judging mode).
-ENABLE_LIVE_IMD = os.getenv("ENABLE_LIVE_IMD", "true").lower() != "false"
+# Hybrid mode: SQL dataset is primary. Set ENABLE_LIVE_IMD=true to additionally
+# ingest the key-less IMD sources into SQL. OFF by default (no external calls).
+ENABLE_LIVE_IMD = os.getenv("ENABLE_LIVE_IMD", "false").lower() == "true"
 
 # Public IMD web properties used without any API key.
 IMD_V1_BASE = os.getenv("IMD_V1_BASE", "https://api.imd.gov.in/api/v1")

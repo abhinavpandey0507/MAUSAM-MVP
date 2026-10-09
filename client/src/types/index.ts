@@ -221,3 +221,100 @@ export interface AppState {
   voiceAutoSpeak: boolean;
   profile: Profile;
 }
+
+/* ------------------------------------------------------------------ SQL backend */
+
+export interface SqlMeta {
+  available: boolean;
+  isDemo?: boolean;
+  source?: string;
+  count?: number;
+  note?: string;
+  reason?: string;
+}
+
+export interface SqlEnvelope<T> {
+  ok: boolean;
+  data: T;
+  location?: LocationDef;
+  meta: SqlMeta;
+}
+
+export interface ObservationPoint {
+  time: string;
+  temperature: number;
+  feelsLike: number;
+  humidity: number;
+  windSpeed: number;
+  rainfall: number;
+  isDemo: boolean;
+}
+
+export interface AqiPoint {
+  aqi: number;
+  category: string;
+  pm25: number;
+  pm10: number;
+  no2: number;
+  so2: number;
+  co: number;
+  o3: number;
+  recordedAt: string;
+  source: string;
+  isDemo: boolean;
+}
+
+export interface DatasetInfo {
+  locations: number;
+  observations: { count: number; earliest: string | null; latest: string | null; demoRows: number };
+  forecast: { count: number; from: string | null; to: string | null };
+  aqi: { count: number; latest: string | null; demoRows: number };
+  latestObservation: string | null;
+  anyDemoData: boolean;
+  meta: Record<string, unknown>;
+}
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  displayName: string;
+  createdAt: string;
+}
+
+export interface UserPreferences {
+  preferredLocation: string;
+  tempUnit: 'C' | 'F';
+  language: Language;
+  interests: string[];
+  notifyAlerts: boolean;
+  notifyDaily: boolean;
+  notifyInsights: boolean;
+}
+
+export interface InterestOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface DashboardResponse {
+  ok: boolean;
+  location: LocationDef;
+  current: (CurrentWeather & { isDemo: boolean; sourceLabel: string }) | null;
+  forecast: (ForecastDay & { isDemo: boolean })[];
+  hourly: (HourlyPoint & { isDemo: boolean })[];
+  alerts: (Warning & { id: number; isDemo: boolean; instructions: string })[];
+  aqi: AqiPoint | null;
+  recommendations: {
+    persona: string;
+    interests: string[];
+    result: PersonalizationResult | null;
+    note: string;
+  };
+  freshness: {
+    latestObservation: string | null;
+    stale: boolean;
+    forecastDays: number;
+    hasAqi: boolean;
+  };
+}

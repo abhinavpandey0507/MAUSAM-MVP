@@ -34,6 +34,9 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 | 15 | i18n — English / हिन्दी / ਪੰਜਾਬੀ for the **entire** UI *and* every MAUSAM AI answer (weather phrasing, dates, warnings, commute, comfort metrics) | ✅ |
 | 16 | **Immersive weather environment** — animated sky backdrop (clouds / rain / fog / lightning / stars, day-night tint) that mirrors the live conditions behind every page | ✅ |
 | 17 | One-time **AI intro card** ("Meet your weather AI") that greets the user by name, explains the anti-fabrication honesty rule, then never reappears | ✅ |
+| 18 | **Local SQL dataset** — observations, forecasts, hourly, alerts, AQI and dataset metadata ingested into SQLite at startup; historical weather + AQI trend pages read directly from it | ✅ |
+| 19 | **History** (past observations with charts), **Air Quality** (AQI gauge + trend), **Dataset** (coverage + re-ingest) and **About** pages | ✅ |
+| 20 | **Accounts & protected routes** — register/sign-in, PBKDF2-SHA256 hashed passwords, HS256 JWT in an httpOnly cookie, SQL-backed preferences and interests; optional | ✅ |
 
 ---
 
@@ -62,9 +65,12 @@ fallback/simulated data** everywhere else. No metric is ever fabricated as live.
 >    (`https://mausam-mvp.onrender.com` by default).
 
 > The backend is **Fully Key-less Python (FastAPI)** — it never needs an IMD API key.
-> Live IMD scraping runs best from India; from overseas hosts it may be unreachable —
-> the app then shows clearly-labelled simulated data, exactly as designed. The
-> personalization, onboarding, MAUSAM AI and warning-override demos work everywhere.
+> Weather data flows **Frontend → MAUSAM backend → local SQLite dataset**. At startup the
+> backend ingests IMD data into SQL when `ENABLE_LIVE_IMD=true` (best from India) and
+> otherwise seeds the dataset from the labelled simulator (default). Live IMD scraping
+> runs best from India; from overseas hosts it may be unreachable — the app then shows
+> clearly-labelled simulated data, exactly as designed. The personalization, onboarding,
+> MAUSAM AI, warning-override, accounts and chart demos work everywhere.
 
 ### Option A — Production (single server)
 
@@ -114,7 +120,11 @@ The backend reads environment variables (set them before starting uvicorn; there
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `PORT` | `4000` | Server port |
-| `ENABLE_LIVE_IMD` | `true` | Set to `false` to force the labelled simulator everywhere (judging mode) |
+| `ENABLE_LIVE_IMD` | `false` | Hybrid mode. `true` additionally ingests the key-less IMD sources into SQL; `false` (default) seeds the dataset from the labelled simulator — no external calls |
+| `MAUSAM_DB_PATH` | `server/data/mausam.db` | SQLite database file (created automatically) |
+| `MAUSAM_JWT_SECRET` | `mausam-dev-secret-change-me` | Secret used to sign session JWTs — **set a strong value in production** |
+| `MAUSAM_TOKEN_TTL` | `604800` (7 days) | Session cookie lifetime in seconds |
+| `CLIENT_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,…` | CORS origins allowed to use credentialed requests |
 | `IMD_V1_BASE` | `https://api.imd.gov.in/api/v1` | v1 API base (kept for status reporting; **no key is ever sent**) |
 | `IMD_LEGACY_BASE` | `https://mausam.imd.gov.in/api` | IMD district / legacy endpoints |
 | `IMD_CITY_BASE` | `https://city.imd.gov.in/api` | City weather endpoint |
@@ -166,11 +176,26 @@ public IMD URLs; anything that does not answer falls back to the labelled simula
 ## 5. Where the data comes from (honesty map)
 
 **MAUSAM AI is a grounded language layer, not a chatbot.** Its pipeline is exactly the
-homepage's: `IMD data → normalized weather → personalization engine → context → answer`.
+homepage's: `SQL dataset → normalized weather → personalization engine → context → answer`.
 Every answer is built from the values already shown on-screen; where a value is absent it
 says *"I don't have that information from the current weather source."* The answer layer is
 deterministic for the MVP (no fabricated metrics), with an LLM-only-as-language-layer
 seam left in place for a future optional LLM.
+
+**All weather serves come from the SQL dataset** (`server/data/mausam.db`, created at
+startup). The `/api/weather/*`, `/api/dashboard`, `/api/locations/search` and
+`/api/dataset/*` endpoints are pure SQL reads — no third-party weather API is contacted at
+request time. The **Dataset** page shows live row counts, coverage and the ingest mode.
+
+**Ingestion (hybrid):** `ingest.py` fills the dataset once at startup (and on demand via
+`POST /api/dataset/ingest`). With `ENABLE_LIVE_IMD=true` it first tries the key-less IMD
+sources; everything else falls back to the deterministic simulator. Each row records
+`is_demo` + `source` so provenance is auditable end-to-end.
+
+**Accounts:** optional. Registered users get PBKDF2-SHA256-hashed passwords and an HS256
+session JWT set as an **httpOnly cookie** (`mausam_session`); preferences/interests are
+persisted in SQL. The token is also returned in the response body for same-page use, but
+the client keeps it **in memory only** (never localStorage).
 
 **LIVE — no key needed (this backend is fully key-less):**
 - **Current observation** (New Delhi-Safdarjung and regional stations) — scraped from the
@@ -199,58 +224,71 @@ seam left in place for a future optional LLM.
 
 ```
 server/                         Python 3 (FastAPI) backend :4000  — 100% key-less
-  requirements.txt              fastapi · uvicorn · httpx
+  requirements.txt              fastapi · uvicorn · httpx (no DB driver needed: stdlib sqlite3)
   app/
     main.py                     FastAPI app, SafeJSONResponse (NaN→null), static SPA fallback
-    config.py                   env config (PORT, ENABLE_LIVE_IMD, IMD base URLs — no keys)
+    config.py                   env config (PORT, ENABLE_LIVE_IMD, DB path, JWT secret — no keys)
     cache.py                    in-memory TTL cache + /api/status stats
     stations.py                 7 cities (ids, coords, radar codes, obs names)
     http_client.py              async httpx client + JS-compatible helpers
     parsers.py                  tolerant IMD → normalized parsers
     imd_client.py               key-less live-source attempts (scrape → legacy APIs)
     media_service.py            radar + satellite (public gallery)
-    weather_service.py          aggregation, provenance (LIVE/SIMULATED)
     simulator.py                labelled deterministic fallback (FNV-1a noise)
     personalization.py          server mirror of the rule tables
+    db.py                       SQLite schema + connection (WAL), stdlib only
+    ingest.py                   seeds locations + 30-day observations/AQI/forecast into SQL
+    repository.py               typed SQL read/write helpers for the API and auth
+    security.py                 PBKDF2-SHA256 password hashing + HS256 JWT (stdlib)
+    api.py                      /api router: weather, history, AQI, dashboard, dataset, auth, user
+    envelope.py                 SQL → legacy WeatherEnvelope shape used by the original pages
 
 client/                         React 18 + Vite + Tailwind (TS)
   src/
-    pages/                      Onboarding (6-step wizard), Home, Forecast, Nowcast,
-                                Alerts, Radar, Satellite, Demo, Profile, Settings
+    pages/                      Onboarding (6-step wizard), Home, Forecast, Nowcast, Alerts,
+                                Radar, Satellite, Demo, Profile, Settings, Auth, History,
+                                AirQuality, Dataset, About
     ai/mausamAi.ts              data-grounded answer engine (context → persona-aware answers,
                                 fully localized en / hi / pa)
-    components/                 TopBar, BottomNav, AppFooter, MausamAi (floating robot
-                                assistant w/ voice), WeatherEnvironment (animated backdrop),
-                                PersonalizedInsight, cards/*, LocationPicker,
+    components/                 TopBar (with browse menu), BottomNav, AppFooter, MausamAi
+                                (floating robot assistant w/ voice), WeatherEnvironment,
+                                ProtectedRoute, PersonalizedInsight, cards/*, LocationPicker,
                                 PersonaPicker, Modal, WhyButton…
     services/voice.ts           Speech Recognition + TTS (en-IN / hi-IN / pa-IN)
+    services/apiClient.ts       centralized fetch: base URL, credentials, timeout, ApiError
+    services/api.ts             legacy endpoint wrappers + static-host simulator fallback
+    services/sqlApi.ts          typed SQL-backed endpoints (weather/history/AQI/dataset/auth/user)
+    context/AuthContext.tsx     session via httpOnly cookie + in-memory token, prefs sync
     weather/environmentEngine.ts day/night + condition → sky scene (clouds/rain/fog/storm/stars)
-    data/                       personas.ts (14), requirements.ts (catalog + boosts)
+    data/                       personas.ts (14), requirements.ts (catalog + boosts), locations.ts
     personalization/            engine.ts (weights + scoring), recommendations.ts
     i18n/translations.ts        en / hi / pa (UI + every AI answer + robot copy)
     context/AppContext.tsx      state + localStorage + onboarding gate + demo severe + voice prefs
-    services/api.ts             typed API client
 ```
 
 ---
 
 ## 7. Notes & known limits
 
-- The GitHub Pages build runs without a backend: `client/src/services/api.ts` detects the
-  static host and serves the labelled fallback simulator directly (radar/satellite remain
-  live IMD images). Deploying `server/` adds the server-side observation scrape + IMD
-  district/legacy APIs — again with **no API key**.
+- The GitHub Pages static build runs without a backend: `client/src/services/api.ts`
+  detects the static host and serves the labelled fallback simulator directly.
+  Deploying `server/` activates the full SQL dataset, history/AQI charts, accounts and
+  the configurable `VITE_API_BASE_URL` client.
 - The source parsers are tolerant, best-effort — a scraping smudge is rejected instead of
-  shown as live; if IMD changes a page the app degrades to labelled simulation.
+  shown as live; if IMD changes a page the app degrades to labelled simulation. With
+  `ENABLE_LIVE_IMD=false` (default) no external calls are made at all.
 - **NaN safety:** the FastAPI layer serializes any `NaN`/`Infinity` as `null` so the JSON
   payload is always valid for the browser (`SafeJSONResponse` in `app/main.py`).
-- The homepage scrape is a tolerant best-effort parse — it may stop working if IMD
-  changes the page structure; the app degrades to labelled simulation automatically.
+- **Auth across origins:** the session cookie works over same-origin (Vite proxy in dev /
+  FastAPI serving the built client in prod) and via the Bearer token otherwise. Plain-HTTP
+  cross-site cookie sending is blocked by browsers — use same-origin or HTTPS.
 - All values from the simulator use per-city monthly climate normals and a seeded PRNG,
   so two runs of the same city/day/hour agree, but they are still *not* real observations.
-- Personal data (name, phone, email, roles, requirements, notifications, saved locations) is
-  stored **only in `localStorage`** and never leaves the device; "Delete profile & data"
-  clears it. The backend has no keys to store or leak.
+- Guest data (name, phone, email, roles, requirements, notifications, saved locations) stays
+  in `localStorage`; when you sign in, preferences/interests are stored in the local SQL
+  database and can be deleted at any time. There are no external services storing data.
+- The database file lives at `server/data/mausam.db` and is gitignored (it regenerates at
+  startup); `server/data/`, `server/.venv/` and `__pycache__/` are never committed.
 - Onboarding is shown until the profile is marked `onboarded`; features are reachable
   immediately after (no gaps to other pages first).
 
