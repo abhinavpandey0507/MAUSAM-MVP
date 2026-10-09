@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>MAUSAM</title>
+    <script>
+      // GitHub Pages SPA fallback: deep links (e.g. /forecast) 404 on a static
+      // host, so route any unknown path back to the app root. The app itself
+      // handles in-app navigation without a reload.
+      (function () {
+        var base = '/MAUSAM-MVP/';
+        if (window.location.pathname.indexOf('/MAUSAM-MVP/') === 0) {
+          history.replaceState(null, '', base);
+        }
+        window.location.replace(base);
+      })();
+    </script>
+  </head>
+  <body>
+    Redirecting to MAUSAM…
+  </body>
+</html>
